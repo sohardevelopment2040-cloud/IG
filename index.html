@@ -48,7 +48,8 @@
             #reportArea { display: block !important; font-size: 12.5px; }
             body.print-full #reportArea { break-before: page; page-break-before: always; }
             body.print-report > *:not(#reportArea) { display: none !important; }
-            body.print-report #reportArea .r-card + .r-card { break-before: page; page-break-before: always; }
+            #reportArea .r-card + .r-card { break-before: page; page-break-before: always; }
+            body.print-full #reportArea .r-card { break-before: page; page-break-before: always; }
             .container-fluid { padding-left: 0 !important; padding-right: 0 !important; margin-top: 0 !important; margin-bottom: 0 !important; }
             .card-custom { box-shadow: none !important; border: 1px solid #ccc !important; }
             .card-custom.p-4, .card-custom.p-3 { padding: .6rem !important; }
@@ -93,7 +94,10 @@
         .sw-custom.active i { color: #fff; }
         .sw-custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
         /* ===== التقرير المفصّل ===== */
-        #reportArea { display: none; }
+        #reportArea { display: none; padding: 0 3px; box-sizing: border-box; }
+        #reportArea .r-head, #reportArea .r-summary, #reportArea .r-charts, #reportArea .r-goal, #reportArea .r-grid, #reportArea .r-members,
+        #reportArea .r-prog, #reportArea .r-weeks, #reportArea .r-tbl tr, #reportArea .r-nl li, #reportArea .r-foot, #reportArea .r-sub { break-inside: avoid; page-break-inside: avoid; }
+        #reportArea .r-sub { break-after: avoid; page-break-after: avoid; }
         .r-head { display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #1a365d, #2b6cb0); color: #fff; border-radius: 12px; padding: 14px 18px; margin-bottom: 12px; }
         .r-head h1 { color: #fff; font-size: 19px; font-weight: 800; margin: 0 0 3px; }
         .r-date { text-align: center; background: rgba(255,255,255,.15); border-radius: 8px; padding: 6px 12px; font-size: 11px; }
@@ -124,9 +128,7 @@
         .r-tbl td { text-align: right; }
         .r-notes { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; background: #fffdf7; }
         .r-sub { font-weight: 800; color: var(--sc); margin-bottom: 4px; } .r-sub.mt { margin-top: 10px; }
-        .r-wrap { width: 100%; border-collapse: collapse; } .r-wrap > * > tr > td { padding: 0; }
-        .r-foot-space { height: 16mm; }
-        .r-foot { position: fixed; bottom: 0; left: 0; background: #fff; width: fit-content; text-align: left; font-size: 12px; color: #4a5568; border-top: 2px solid #2b6cb0; padding-top: 6px; line-height: 1.8; break-inside: avoid; }
+        .r-foot { margin-top: 18px; margin-right: auto; width: fit-content; text-align: left; font-size: 12px; color: #4a5568; border-top: 2px solid #2b6cb0; padding-top: 6px; line-height: 1.8; break-inside: avoid; }
         .r-foot b { color: #1a365d; }
         .r-charts { display: flex; gap: 10px; margin-bottom: 14px; break-inside: avoid; }
         .r-cbox { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; background: #fff; }

@@ -844,11 +844,10 @@ function buildReport(list, withSummary) {
       <div style="--k:#c53030"><b>${c('متأخرة')}</b>متأخرة</div><div style="--k:#718096"><b>${c('لم تبدأ')}</b>لم تبدأ</div></div>
     <div class="r-charts"><div class="r-cbox"><div class="r-sub" style="--sc:#1a365d"><i class="fa-solid fa-chart-bar"></i> نسبة إنجاز كل مبادرة</div>${chartProgressBars()}</div>
       <div class="r-cbox"><div class="r-sub" style="--sc:#1a365d"><i class="fa-solid fa-chart-pie"></i> تصنيف حالة المبادرات</div>${chartStatusDonut()}</div></div>` : '';
-  return `<table class="r-wrap"><tbody><tr><td><header class="r-head"><div><h1>منظومة إدارة ومتابعة المبادرات الإستراتيجية</h1>
+  return `<header class="r-head"><div><h1>منظومة إدارة ومتابعة المبادرات الإستراتيجية</h1>
       <div>${list.length === 1 ? 'تقرير مبادرة' : 'التقرير المفصّل للمبادرات'}</div></div><div class="r-date">تاريخ التقرير<br><b>${stamp()}</b></div></header>
     ${sum}${list.map(reportCard).join('')}
-    </td></tr></tbody><tfoot><tr><td><div class="r-foot-space"></div></td></tr></tfoot></table>
-    <footer class="r-foot"><div>أخصائي المتابعة: <b>فهد العبيداني</b></div><div>إعداد وتصميم: <b>إبراهيم البلوشي</b></div></footer>`;
+    <footer class="r-foot"><div>مسؤول المبادرات: <b>محمد السعدي</b></div><div>أخصائي المتابعة: <b>فهد العبيداني</b></div><div>إعداد وتصميم: <b>إبراهيم البلوشي</b></div><div>اعتماد مدير الدائرة: <b>الدكتور سعيد الشبلي</b></div></footer>`;
 }
 function preparePrint(mode) {
   printMode = mode;
