@@ -1,5 +1,5 @@
 /* Service Worker — منظومة متابعة المبادرات */
-const VERSION = 'initiatives-mobile-v3';
+const VERSION = 'initiatives-mobile-v7';
 const CORE = [
   './',
   './index.html',

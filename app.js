@@ -55,7 +55,7 @@ function emptyState() {
     schema: 2,
     initiatives: SEED_INITIATIVES.map((r, i) => ({
       id: i + 1, code: '', name: r[0], target: r[2], targetCount: 0, unit: 'ملف', duration: r[1], extension: '', leader: 'غير محدد', members: [],
-      weeks: [0, 0, 0, 0, 0, 0], notes: '', supervisor: '', follower: '', progress: 0, status: 'لم تبدأ'
+      weeks: [0, 0, 0, 0, 0, 0], notes: '', noteColors: [], supervisor: '', follower: '', progress: 0, status: 'لم تبدأ'
     })),
     tasks: [], field: [], financial: [], risks: [],
     meta: { createdAt: new Date().toISOString(), updatedAt: null, lastBackupAt: null, touched: false }
@@ -75,6 +75,41 @@ const pad = n => String(n).padStart(2, '0');
 const stamp = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const stampTime = (d = new Date()) => `${stamp(d)}-${pad(d.getHours())}${pad(d.getMinutes())}`;
 const hhmm = (d = new Date()) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const isHex = c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+
+/* ---------- الملاحظات الملوّنة ---------- */
+// كل سطر في notes ملاحظة مستقلة، ولونها في noteColors بنفس الترتيب ('' = اللون الافتراضي)
+const NOTE_COLORS = [
+  ['', 'افتراضي', '#2d3748'], ['#c53030', 'أحمر'], ['#2f855a', 'أخضر'], ['#2b6cb0', 'أزرق'],
+  ['#c05621', 'برتقالي'], ['#6b46c1', 'بنفسجي'], ['#b7791f', 'ذهبي'], ['#d53f8c', 'وردي'], ['#718096', 'رمادي']
+];
+const noteLines = it => String(it.notes || '').split('\n').map((t, i) => ({ t: t.trim(), c: (it.noteColors || [])[i] || '' })).filter(l => l.t);
+const noteClean = t => t.replace(/^[*•\-–]+\s*/, '');
+function notesListHtml(it, cls = 'note-list') {
+  const lines = noteLines(it);
+  if (!lines.length) return '<span class="text-muted">—</span>';
+  return `<ul class="${cls}">${lines.map(l => `<li style="--nc:${l.c || '#4a5568'};${l.c ? `color:${l.c};font-weight:700` : ''}">${esc(noteClean(l.t))}</li>`).join('')}</ul>`;
+}
+function noteRowHtml(t = '', c = '') {
+  const sw = NOTE_COLORS.map(([v, n, d]) => `<button type="button" class="sw${v === c ? ' active' : ''}" data-sw="${v}" style="background:${v || d}" title="${n}" aria-label="${n}"></button>`).join('');
+  const custom = c && !NOTE_COLORS.some(x => x[0] === c);
+  return `<div class="note-row" data-color="${esc(c)}" style="--nc:${c || '#cbd5e0'}">
+    <div class="d-flex align-items-center gap-1 mb-1 flex-wrap">${sw}
+      <label class="sw sw-custom${custom ? ' active' : ''}" title="لون آخر" ${custom ? `style="background:${c}"` : ''}><i class="fa-solid fa-palette"></i><input type="color" data-swc value="${c || '#000000'}"></label>
+      <span class="ms-auto d-flex gap-1">
+        <button type="button" class="btn btn-sm btn-light border py-0 px-2" data-mvnote="-1" title="أعلى"><i class="fa-solid fa-arrow-up"></i></button>
+        <button type="button" class="btn btn-sm btn-light border py-0 px-2" data-mvnote="1" title="أسفل"><i class="fa-solid fa-arrow-down"></i></button>
+        <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2" data-rmnote title="حذف الملاحظة"><i class="fa-solid fa-xmark"></i></button>
+      </span></div>
+    <textarea class="form-control form-control-sm note-text" rows="2" style="${c ? `color:${c};font-weight:700` : ''}" placeholder="اكتب الملاحظة...">${esc(t)}</textarea></div>`;
+}
+function setNoteColor(row, c) {
+  row.dataset.color = c; row.style.setProperty('--nc', c || '#cbd5e0');
+  const ta = $('.note-text', row); ta.style.color = c || ''; ta.style.fontWeight = c ? '700' : '';
+  $$('.sw', row).forEach(b => b.classList.toggle('active', b.dataset.sw === c));
+  const cu = $('.sw-custom', row), isCustom = c && !NOTE_COLORS.some(x => x[0] === c);
+  cu.classList.toggle('active', !!isCustom); cu.style.background = isCustom ? c : '';
+}
 
 /* ---------- الحالة العامة ---------- */
 let S = emptyState();
@@ -115,7 +150,8 @@ function normalize(raw) {
       id: isFinite(+x.id) && +x.id > 0 ? +x.id : i + 1,
       code: String(x.code ?? ''), name: String(x.name ?? ''), leader: String(x.leader ?? 'غير محدد'), members: toList(x.members), duration: (legacy && LEGACY_DURATIONS[x.name] === String(x.duration ?? '')) ? DEFAULT_DURATION : String(x.duration ?? ''), extension: String(x.extension ?? ''),
       target: String(x.target ?? ''), targetCount: Math.max(0, num(x.targetCount)), unit: String(x.unit ?? 'ملف') || 'ملف', weeks: toWeeks(x.weeks),
-      notes: String(x.notes ?? ''), supervisor: String(x.supervisor ?? ''), follower: String(x.follower ?? ''), progress: clamp(num(x.progress), 0, 100),
+      notes: String(x.notes ?? ''), noteColors: Array.isArray(x.noteColors) ? x.noteColors.map(c => isHex(c) ? c : '') : [],
+      supervisor: String(x.supervisor ?? ''), follower: String(x.follower ?? ''), progress: clamp(num(x.progress), 0, 100),
       status: INIT_STATUS.includes(x.status) ? x.status : 'لم تبدأ'
     })),
     tasks: arr('tasks').map(x => ({
@@ -198,11 +234,11 @@ const SCHEMAS = {
       { k: 'weeks', l: 'العدد المنجز أسبوعيًا', t: 'weeks' },
       { k: 'status', l: 'الحالة', t: 'select', opts: INIT_STATUS },
       { k: 'progress', l: 'نسبة الإنجاز (%) — يدوية عند عدم تحديد العدد المستهدف', t: 'number', min: 0, max: 100, step: 1 },
-      { k: 'notes', l: 'الملاحظات', t: 'textarea' },
+      { k: 'notes', l: 'الملاحظات (لكل ملاحظة لون تختاره)', t: 'cnotes' },
       { k: 'supervisor', l: 'المشرف العام على المبادرة', t: 'text' },
       { k: 'follower', l: 'مسؤول المتابعة', t: 'text' }
     ],
-    blank: () => ({ code: '', name: '', target: '', targetCount: 0, unit: 'ملف', duration: '', extension: '', leader: '', members: [], weeks: [0, 0, 0, 0, 0, 0], status: 'لم تبدأ', progress: 0, notes: '', supervisor: '', follower: '' })
+    blank: () => ({ code: '', name: '', target: '', targetCount: 0, unit: 'ملف', duration: '', extension: '', leader: '', members: [], weeks: [0, 0, 0, 0, 0, 0], status: 'لم تبدأ', progress: 0, notes: '', noteColors: [], supervisor: '', follower: '' })
   },
   tasks: {
     title: 'مهمة',
@@ -452,6 +488,14 @@ function fieldHtml(f, val) {
         <button type="button" class="btn btn-sm btn-outline-secondary" data-rmweek><i class="fa-solid fa-minus me-1"></i>حذف آخر أسبوع</button>
       </div><div class="form-text">يُجمع المنجز تلقائيًا، وتُحسب نسبة الإنجاز منه إذا حددت العدد المستهدف. عند تمديد المدة أضف أسابيع جديدة.</div></div>`;
   }
+  if (f.t === 'cnotes') {
+    const it = { notes: val, noteColors: formCtx && formCtx.noteColors || [] };
+    const lines = noteLines(it);
+    return `<div class="mb-3"><label class="form-label fw-bold">${esc(f.l)}</label>
+      <div id="notesList">${(lines.length ? lines : [{ t: '', c: '' }]).map(l => noteRowHtml(l.t, l.c)).join('')}</div>
+      <button type="button" class="btn btn-sm btn-outline-primary" data-addnote><i class="fa-solid fa-plus me-1"></i>إضافة ملاحظة</button>
+      <div class="form-text">اختر لون كل ملاحظة من الدوائر الملونة. عند لصق عدة أسطر دفعة واحدة تُقسَّم تلقائيًا إلى ملاحظات.</div></div>`;
+  }
   const id = 'f_' + f.k, lab = `<label class="form-label fw-bold" for="${id}">${esc(f.l)}${f.req ? ' <span class="text-danger">*</span>' : ''}</label>`;
   let ctl = '';
   if (f.t === 'text') ctl = `<input class="form-control" id="${id}" name="${f.k}" value="${esc(val)}" placeholder="${esc(f.ph || '')}" ${f.dl ? 'list="dl_people" autocomplete="off"' : ''} ${f.req ? 'required' : ''}>` + (f.dl ? `<datalist id="dl_people">${knownPeople().map(n => `<option value="${esc(n)}">`).join('')}</datalist>` : '');
@@ -473,7 +517,7 @@ function openForm(section, id) {
   const sc = SCHEMAS[section];
   const rec = id != null ? S[section].find(r => String(r.id) === String(id)) : null;
   const val = rec ? rec : sc.blank();
-  formCtx = { section, id: rec ? rec.id : null, images: rec && rec.images ? rec.images.slice() : [] };
+  formCtx = { section, id: rec ? rec.id : null, images: rec && rec.images ? rec.images.slice() : [], noteColors: rec && rec.noteColors ? rec.noteColors.slice() : [] };
   $('#formTitle').textContent = (rec ? 'تعديل ' : 'إضافة ') + sc.title;
   $('#formBody').innerHTML = sc.fields.map(f => fieldHtml(f, val[f.k])).join('');
   $('#recordForm').classList.remove('was-validated');
@@ -513,6 +557,11 @@ function submitForm(e) {
     if (f.t === 'images') { rec.images = formCtx.images.slice(); return; }
     if (f.t === 'list') { rec.members = toList(form.elements[f.k].value); return; }
     if (f.t === 'weeks') { rec.weeks = toWeeks($$('#weeksRow input').map(el => el.value)); return; }
+    if (f.t === 'cnotes') {
+      const lines = [], colors = [];
+      $$('#notesList .note-row').forEach(r => { const t = $('.note-text', r).value.replace(/\s*\n\s*/g, ' ').trim(); if (t) { lines.push(t); colors.push(r.dataset.color || ''); } });
+      rec.notes = lines.join('\n'); rec.noteColors = colors; return;
+    }
     const el = form.elements[f.k]; let v = el ? el.value.trim() : '';
     if (f.t === 'number') v = f.k === 'progress' ? clamp(num(v), 0, 100) : Math.max(0, num(v));
     rec[f.k] = v;
@@ -578,8 +627,8 @@ function showDetail(id) {
     </table>
     <div class="progress mb-1" style="height:12px"><div class="progress-bar bg-primary" style="width:${it.progress}%"></div></div>
     <div class="small text-muted mb-3">نسبة الإنجاز: ${fmtInt(it.progress)}%${it.targetCount > 0 ? ' (محسوبة من المنجز والمستهدف)' : ''}</div>
-    <div class="small text-muted">الملاحظات</div>
-    <div style="white-space:pre-wrap">${esc(it.notes) || '<span class="text-muted">—</span>'}</div>`;
+    <div class="small text-muted mb-1">الملاحظات</div>
+    ${notesListHtml(it)}`;
   detailModal.show();
 }
 
@@ -702,6 +751,117 @@ function exportCSV(key) {
   download(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${d.name}-${stamp()}.csv`);
 }
 
+/* ---------- التقرير المفصّل الملوّن (طباعة / PDF) ---------- */
+const STATUS_COLOR = { 'مكتملة': '#2f855a', 'قيد التنفيذ': '#2b6cb0', 'متأخرة': '#c53030', 'لم تبدأ': '#718096' };
+let printMode = null;
+/* رسوم SVG للتقرير (لا تعتمد على مكتبات خارجية وتُطبع بوضوح) */
+const svgTxt = (x, y, t, a = '') => `<text x="${x}" y="${y}" ${a}>${esc(t)}</text>`;
+function niceMax(v) { if (v <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
+function chartProgressBars() {
+  const L = S.initiatives, W = 640, rowH = 26, top = 8, H = top + L.length * rowH + 22, lab = 250, x0 = 40, bw = W - lab - x0 - 10;
+  const short = t => t.length > 38 ? t.slice(0, 37) + '…' : t;
+  let g = '';
+  [0, 25, 50, 75, 100].forEach(v => { const x = x0 + bw - bw * v / 100; g += `<line x1="${x}" y1="${top}" x2="${x}" y2="${H - 20}" stroke="#e2e8f0"/>` + svgTxt(x, H - 6, v + '%', 'text-anchor="middle" font-size="10" fill="#718096"'); });
+  L.forEach((it, i) => {
+    const y = top + i * rowH, w = bw * it.progress / 100, col = STATUS_COLOR[it.status] || '#2b6cb0';
+    g += svgTxt(W - 4, y + 17, (it.code || i + 1) + '. ' + short(it.name), 'text-anchor="start" direction="rtl" style="direction:rtl;unicode-bidi:embed" font-size="11.5" fill="#2d3748"');
+    g += `<rect x="${x0}" y="${y + 5}" width="${bw}" height="15" rx="4" fill="#f1f5f9"/><rect x="${x0 + bw - w}" y="${y + 5}" width="${w}" height="15" rx="4" fill="${col}"/>`;
+    g += svgTxt(x0 + bw - w - 4, y + 17, fmtInt(it.progress) + '%', `text-anchor="end" font-size="11" font-weight="700" fill="${col}"`);
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" class="r-svg">${g}</svg>`;
+}
+function chartStatusDonut() {
+  const keys = ['مكتملة', 'قيد التنفيذ', 'متأخرة', 'لم تبدأ'], cnt = keys.map(k => S.initiatives.filter(i => i.status === k).length), tot = cnt.reduce((a, b) => a + b, 0) || 1;
+  const cx = 85, cy = 85, r = 62, sw = 26, C = 2 * Math.PI * r; let off = 0, g = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#edf2f7" stroke-width="${sw}"/>`;
+  keys.forEach((k, i) => { if (!cnt[i]) return; const len = C * cnt[i] / tot;
+    g += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${STATUS_COLOR[k]}" stroke-width="${sw}" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cy})"/>`; off += len; });
+  g += svgTxt(cx, cy + 4, S.initiatives.length, 'text-anchor="middle" font-size="24" font-weight="800" fill="#1a365d"') + svgTxt(cx, cy + 22, 'مبادرة', 'text-anchor="middle" font-size="11" fill="#718096"');
+  keys.forEach((k, i) => { const y = 40 + i * 28;
+    g += `<rect x="296" y="${y - 11}" width="14" height="14" rx="3" fill="${STATUS_COLOR[k]}"/>` + svgTxt(288, y, `${k}: ${cnt[i]}`, 'text-anchor="end" font-size="12.5" fill="#2d3748"'); });
+  return `<svg viewBox="0 0 320 175" class="r-svg">${g}</svg>`;
+}
+function chartWeeks(it) {
+  const wk = it.weeks, n = wk.length, W = 700, H = 190, padL = 46, padR = 12, padT = 22, padB = 28, cw = W - padL - padR, ch = H - padT - padB;
+  if (!wk.some(v => v > 0)) return `<div class="r-nochart">لم يُسجَّل منجز أسبوعي بعد</div>`;
+  const cum = []; wk.reduce((a, v, i) => (cum[i] = a + v), 0);
+  let mx = Math.max(...cum, ...wk); const showT = it.targetCount > 0 && it.targetCount <= mx * 2.5;
+  if (showT) mx = Math.max(mx, it.targetCount);
+  mx = niceMax(mx * 1.1);
+  const col = STATUS_COLOR[it.status] || '#2b6cb0', step = cw / n, bw = Math.min(46, step * .55);
+  const X = i => padL + cw - step * (i + .5), Y = v => padT + ch - ch * v / mx;   // الأسبوع الأول على اليمين
+  let g = '';
+  for (let k = 0; k <= 4; k++) { const v = mx * k / 4, y = Y(v); g += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#edf2f7"/>` + svgTxt(padL - 6, y + 4, fmtInt(Math.round(v)), 'text-anchor="end" font-size="10" fill="#a0aec0"'); }
+  if (showT) g += `<line x1="${padL}" y1="${Y(it.targetCount)}" x2="${W - padR}" y2="${Y(it.targetCount)}" stroke="#c53030" stroke-dasharray="6 4" stroke-width="1.5"/>` + svgTxt(padL + 4, Y(it.targetCount) - 5, 'المستهدف ' + fmtInt(it.targetCount), 'font-size="10.5" fill="#c53030" font-weight="700" text-anchor="start"');
+  wk.forEach((v, i) => { const x = X(i), y = Y(v);
+    g += `<rect x="${x - bw / 2}" y="${y}" width="${bw}" height="${padT + ch - y}" rx="4" fill="${col}" opacity=".85"/>`;
+    if (v > 0) g += svgTxt(x, y - 4, fmtInt(v), `text-anchor="middle" font-size="11" font-weight="700" fill="${col}"`);
+    g += svgTxt(x, H - 9, weekLabel(i).replace('الأسبوع ', 'أ. '), 'text-anchor="middle" font-size="10.5" fill="#4a5568"'); });
+  const last = wk.reduce((a, v, i) => v > 0 ? i : a, 0), pts = cum.slice(0, last + 1).map((v, i) => `${X(i)},${Y(v)}`).join(' ');
+  g += `<polyline points="${pts}" fill="none" stroke="#d69e2e" stroke-width="2.5"/>` + cum.slice(0, last + 1).map((v, i) => `<circle cx="${X(i)}" cy="${Y(v)}" r="3.5" fill="#fff" stroke="#d69e2e" stroke-width="2"/>`).join('');
+  g += svgTxt(X(last), Math.max(12, Y(cum[last]) - 10), 'التراكمي ' + fmtInt(cum[last]), 'text-anchor="middle" font-size="10.5" font-weight="700" fill="#b7791f"');
+  return `<svg viewBox="0 0 ${W} ${H}" class="r-svg">${g}</svg>
+    <div class="r-legend"><span><i style="background:${col}"></i>المنجز الأسبوعي</span><span><i style="background:#d69e2e"></i>المنجز التراكمي</span>${showT ? '<span><i style="background:#c53030"></i>العدد المستهدف</span>' : (it.targetCount > 0 ? `<span>المستهدف: ${fmtInt(it.targetCount)} ${esc(it.unit)}</span>` : '')}</div>`;
+}
+function reportCard(it) {
+  const idx = S.initiatives.indexOf(it), total = sumWeeks(it), unit = esc(it.unit), col = STATUS_COLOR[it.status] || '#2b6cb0';
+  const box = (l, v, ic) => `<div class="r-box"><div class="r-lbl"><i class="fa-solid ${ic}"></i> ${l}</div><div class="r-val">${v || '—'}</div></div>`;
+  const tasks = S.tasks.filter(t => String(t.initiativeId) === String(it.id));
+  const risks = S.risks.filter(r => String(r.initiativeId) === String(it.id));
+  return `<section class="r-card" style="--sc:${col}">
+    <div class="r-title">
+      <span class="r-num">${esc(it.code || idx + 1)}</span>
+      <h2>${esc(it.name)}</h2>
+      <span class="r-status">${esc(it.status)}</span>
+    </div>
+    <div class="r-body">
+      ${it.target ? `<div class="r-goal"><i class="fa-solid fa-bullseye"></i> <b>الهدف:</b> ${esc(it.target)}</div>` : ''}
+      <div class="r-grid">
+        ${box('العدد المستهدف', it.targetCount > 0 ? fmtInt(it.targetCount) + ' ' + unit : '', 'fa-flag-checkered')}
+        ${box('إجمالي المنجز', fmtInt(total) + ' ' + unit, 'fa-circle-check')}
+        ${box('المتبقي', it.targetCount > 0 ? fmtInt(Math.max(0, it.targetCount - total)) + ' ' + unit : '', 'fa-hourglass-half')}
+        ${box('المدة', esc(it.duration) + (it.extension ? ` <small class="r-ext">ممدّدة إلى ${esc(it.extension)}</small>` : ''), 'fa-calendar-days')}
+        ${box('رئيس الفريق', esc(it.leader), 'fa-user-tie')}
+        ${box('المشرف العام', esc(it.supervisor), 'fa-user-shield')}
+        ${box('مسؤول المتابعة', esc(it.follower), 'fa-user-check')}
+        ${box('عدد الأعضاء', it.members.length ? fmtInt(it.members.length) : '', 'fa-users')}
+      </div>
+      ${it.members.length ? `<div class="r-members"><b>أعضاء الفريق:</b> ${it.members.map(m => `<span>${esc(m)}</span>`).join('')}</div>` : ''}
+      <div class="r-prog"><div class="r-prog-bar"><div style="width:${it.progress}%"></div></div><b>${fmtInt(it.progress)}%</b></div>
+      <div class="r-chart"><div class="r-sub"><i class="fa-solid fa-chart-column"></i> المنجز الأسبوعي والتراكمي</div>${chartWeeks(it)}</div>
+      <table class="r-weeks"><thead><tr>${it.weeks.map((_, i) => `<th>${weekLabel(i).replace('الأسبوع ', 'أ. ')}</th>`).join('')}<th class="r-tot">الإجمالي</th></tr></thead>
+        <tbody><tr>${it.weeks.map(w => `<td class="${w > 0 ? 'on' : ''}">${fmtInt(w)}</td>`).join('')}<td class="r-tot">${fmtInt(total)}</td></tr></tbody></table>
+      <div class="r-notes"><div class="r-sub"><i class="fa-solid fa-clipboard-list"></i> الملاحظات وسير العمل</div>${notesListHtml(it, 'note-list r-nl')}</div>
+      ${tasks.length ? `<div class="r-sub mt"><i class="fa-solid fa-list-check"></i> المهام</div><table class="r-tbl"><tr><th>المهمة</th><th>الموظف</th><th>الإنتاجية</th><th>الحالة</th></tr>${tasks.map(t => `<tr><td>${esc(t.title)}</td><td>${esc(t.employee)}</td><td>${esc(t.productivity)}</td><td>${esc(t.status)}</td></tr>`).join('')}</table>` : ''}
+      ${risks.length ? `<div class="r-sub mt"><i class="fa-solid fa-triangle-exclamation"></i> المخاطر والتحديات</div><table class="r-tbl"><tr><th>التحدي</th><th>الخطورة</th><th>الإجراء</th><th>الحالة</th></tr>${risks.map(r => `<tr><td>${esc(r.challenge)}</td><td>${esc(r.level)}</td><td>${esc(r.action)}</td><td>${esc(r.status)}</td></tr>`).join('')}</table>` : ''}
+    </div></section>`;
+}
+function buildReport(list, withSummary) {
+  const n = S.initiatives.length, avg = n ? Math.round(S.initiatives.reduce((a, i) => a + i.progress, 0) / n) : 0;
+  const c = s => S.initiatives.filter(i => i.status === s).length;
+  const sum = withSummary ? `<div class="r-summary">
+      <div style="--k:#1a365d"><b>${n}</b>مبادرة</div><div style="--k:#2b6cb0"><b>${avg}%</b>متوسط الإنجاز</div>
+      <div style="--k:#2f855a"><b>${c('مكتملة')}</b>مكتملة</div><div style="--k:#2b6cb0"><b>${c('قيد التنفيذ')}</b>قيد التنفيذ</div>
+      <div style="--k:#c53030"><b>${c('متأخرة')}</b>متأخرة</div><div style="--k:#718096"><b>${c('لم تبدأ')}</b>لم تبدأ</div></div>
+    <div class="r-charts"><div class="r-cbox"><div class="r-sub" style="--sc:#1a365d"><i class="fa-solid fa-chart-bar"></i> نسبة إنجاز كل مبادرة</div>${chartProgressBars()}</div>
+      <div class="r-cbox"><div class="r-sub" style="--sc:#1a365d"><i class="fa-solid fa-chart-pie"></i> تصنيف حالة المبادرات</div>${chartStatusDonut()}</div></div>` : '';
+  return `<table class="r-wrap"><tbody><tr><td><header class="r-head"><div><h1>منظومة إدارة ومتابعة المبادرات الإستراتيجية</h1>
+      <div>${list.length === 1 ? 'تقرير مبادرة' : 'التقرير المفصّل للمبادرات'}</div></div><div class="r-date">تاريخ التقرير<br><b>${stamp()}</b></div></header>
+    ${sum}${list.map(reportCard).join('')}
+    </td></tr></tbody><tfoot><tr><td><div class="r-foot-space"></div></td></tr></tfoot></table>
+    <footer class="r-foot"><div>أخصائي المتابعة: <b>فهد العبيداني</b></div><div>إعداد وتصميم: <b>إبراهيم البلوشي</b></div></footer>`;
+}
+function preparePrint(mode) {
+  printMode = mode;
+  $('#printDate').textContent = 'تاريخ التقرير: ' + stamp();
+  let list = S.initiatives, cls = 'print-full', landscape = true;
+  if (mode === 'detailed') { cls = 'print-report'; landscape = false; }
+  else if (mode.startsWith('one:')) { list = S.initiatives.filter(i => String(i.id) === mode.slice(4)); cls = 'print-report'; landscape = false; }
+  $('#reportArea').innerHTML = buildReport(list, list.length > 1);
+  document.body.classList.remove('print-full', 'print-report'); document.body.classList.add(cls);
+  $('#pageSize').textContent = `@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; }`;
+}
+function printReport(mode) { preparePrint(mode); setTimeout(() => window.print(), 60); }
+
 /* ---------- ربط الأحداث ---------- */
 function bindEvents() {
   formModal = new bootstrap.Modal($('#formModal'));
@@ -710,8 +870,23 @@ function bindEvents() {
   $('#detailEdit').addEventListener('click', () => { detailModal.hide(); if (detailId != null) openForm('initiatives', detailId); });
 
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-add],[data-edit],[data-del],[data-view],[data-csv],[data-rmimg],[data-detail],[data-addweek],[data-rmweek]');
+    const t = e.target.closest('[data-add],[data-edit],[data-del],[data-view],[data-csv],[data-rmimg],[data-detail],[data-addweek],[data-rmweek],[data-sw],[data-addnote],[data-rmnote],[data-mvnote],[data-report]');
     if (!t) return;
+    if (t.dataset.sw != null) { setNoteColor(t.closest('.note-row'), t.dataset.sw); return; }
+    if (t.hasAttribute('data-addnote')) {
+      const list = $('#notesList'); list.insertAdjacentHTML('beforeend', noteRowHtml());
+      $('.note-text', list.lastElementChild).focus(); return;
+    }
+    if (t.hasAttribute('data-rmnote')) {
+      const row = t.closest('.note-row'), list = row.parentElement;
+      if ($('.note-text', row).value.trim() && !confirm('حذف هذه الملاحظة؟')) return;
+      row.remove(); if (!list.children.length) list.insertAdjacentHTML('beforeend', noteRowHtml()); return;
+    }
+    if (t.dataset.mvnote) {
+      const row = t.closest('.note-row'), sib = t.dataset.mvnote === '-1' ? row.previousElementSibling : row.nextElementSibling;
+      if (sib) t.dataset.mvnote === '-1' ? sib.before(row) : sib.after(row); return;
+    }
+    if (t.dataset.report) { printReport(t.dataset.report); return; }
     if (t.dataset.add) openForm(t.dataset.add, null);
     else if (t.dataset.edit) openForm(t.dataset.edit, t.dataset.id);
     else if (t.dataset.del) deleteRecord(t.dataset.del, t.dataset.id);
@@ -735,6 +910,20 @@ function bindEvents() {
   document.addEventListener('change', e => {
     const p = e.target.closest('[data-progress]'); if (p) updateProgress(p.dataset.progress, p.value);
   });
+  // لون مخصص للملاحظة
+  document.addEventListener('input', e => { if (e.target.matches('[data-swc]')) setNoteColor(e.target.closest('.note-row'), e.target.value.toLowerCase()); });
+  // لصق عدة أسطر → كل سطر ملاحظة مستقلة بنفس اللون
+  document.addEventListener('paste', e => {
+    const ta = e.target.closest && e.target.closest('.note-text'); if (!ta) return;
+    const txt = (e.clipboardData || window.clipboardData).getData('text');
+    const parts = txt.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    if (parts.length < 2) return;
+    e.preventDefault();
+    const row = ta.closest('.note-row'), c = row.dataset.color || '';
+    ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + parts[0];
+    let after = row;
+    parts.slice(1).forEach(p => { after.insertAdjacentHTML('afterend', noteRowHtml(p, c)); after = after.nextElementSibling; });
+  });
   document.addEventListener('input', e => {
     const s = e.target.closest('[data-search]'); if (!s) return;
     queries[s.dataset.search] = s.value;
@@ -753,9 +942,10 @@ function bindEvents() {
   $('#alertBackupNow').addEventListener('click', () => ('showDirectoryPicker' in window && window.isSecureContext) ? backupToFolder(false) : exportBackup());
   $('#alertDismiss').addEventListener('click', () => { try { sessionStorage.setItem('bkDismiss', '1'); } catch (e) {} renderBackupAlert(); });
 
-  const doPrint = () => { $('#printDate').textContent = 'تاريخ التقرير: ' + stamp(); window.print(); };
-  window.addEventListener('beforeprint', () => { barChart && barChart.resize(); pieChart && pieChart.resize(); });
-  window.addEventListener('afterprint', () => { barChart && barChart.resize(); pieChart && pieChart.resize(); });
+  const doPrint = () => printReport('full');
+  window.addEventListener('beforeprint', () => { if (!printMode) preparePrint('full'); barChart && barChart.resize(); pieChart && pieChart.resize(); });
+  window.addEventListener('afterprint', () => { printMode = null; barChart && barChart.resize(); pieChart && pieChart.resize(); });
+  $('#detailPrint').addEventListener('click', () => { if (detailId != null) printReport('one:' + detailId); });
   $('#printBtn').addEventListener('click', doPrint); $('#printBtn2').addEventListener('click', doPrint);
 
   if ('showDirectoryPicker' in window && window.isSecureContext) {
