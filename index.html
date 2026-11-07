@@ -168,6 +168,8 @@
                         <li><h6 class="dropdown-header">النسخ الاحتياطي</h6></li>
                         <li><button class="dropdown-item" id="bkExport" type="button"><i class="fa-solid fa-file-arrow-down me-2 text-primary"></i>تصدير نسخة احتياطية (JSON)</button></li>
                         <li id="bkFolderItem" class="d-none"><button class="dropdown-item" id="bkFolder" type="button"><i class="fa-solid fa-folder-open me-2 text-primary"></i>حفظ نسخة في المجلد المحدد</button></li>
+                        <li id="bkAutoItem" class="d-none"><button class="dropdown-item fw-bold" id="bkAuto" type="button"><i class="fa-solid fa-clock-rotate-left me-2 text-success"></i><span id="bkAutoLabel">تفعيل الحفظ التلقائي في مجلد</span></button></li>
+                        <li id="bkPdfItem" class="d-none"><button class="dropdown-item" id="bkPdf" type="button"><i class="fa-solid fa-file-pdf me-2 text-danger"></i>حفظ التقرير PDF في المجلد الآن</button></li>
                         <li id="bkFolderChangeItem" class="d-none"><button class="dropdown-item" id="bkFolderChange" type="button"><i class="fa-solid fa-folder-tree me-2 text-secondary"></i>تغيير مجلد النسخ الاحتياطي</button></li>
                         <li><button class="dropdown-item" id="bkImport" type="button"><i class="fa-solid fa-file-arrow-up me-2 text-primary"></i>استيراد نسخة احتياطية</button></li>
                         <li><hr class="dropdown-divider"></li>
@@ -200,6 +202,13 @@
 
         <!-- تنبيه النسخ الاحتياطي / أخطاء التحميل -->
         <div id="loadError" class="d-none no-print"><div class="alert alert-danger mb-3"></div></div>
+        <div id="autoBkBar" class="d-none no-print">
+            <div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-3">
+                <i class="fa-solid fa-folder-open"></i>
+                <span class="flex-grow-1">الحفظ التلقائي في مجلد النسخ الاحتياطي ومجلد PDF يحتاج موافقتك بعد إعادة فتح البرنامج.</span>
+                <button class="btn btn-sm btn-primary" id="autoBkBtn" type="button">السماح والحفظ الآن</button>
+            </div>
+        </div>
         <div id="backupAlert" class="d-none no-print">
             <div class="alert alert-warning d-flex align-items-center gap-2 flex-wrap mb-3">
                 <i class="fa-solid fa-triangle-exclamation"></i>

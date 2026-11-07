@@ -197,6 +197,7 @@ async function saveNow() {
   try {
     await Store.save(S);
     setSaveState('تم الحفظ ' + hhmm(), 'text-success');
+    scheduleAutoBackup();
   } catch (e) {
     console.error(e);
     setSaveState('تعذّر الحفظ', 'text-danger');
@@ -681,6 +682,205 @@ async function backupToFolder(forcePick) {
     exportBackup();
   }
 }
+/* ---------- الحفظ التلقائي في مجلد (مثل مجلد backup على سطح المكتب) ---------- */
+const AUTO_FILE = 'مبادرات-آخر-نسخة-تلقائية.json';
+let autoOn = false, autoTimer = null, autoWrittenFor = '-', autoBusy = false;
+const canFolder = () => 'showDirectoryPicker' in window && window.isSecureContext;
+function scheduleAutoBackup() {
+  if (!autoOn || S.meta.updatedAt === autoWrittenFor) return;
+  clearTimeout(autoTimer); autoTimer = setTimeout(() => autoBackupNow(false), 3000);
+}
+async function autoBackupNow(interactive) {
+  if (!autoOn || autoBusy) return;
+  autoBusy = true;
+  try {
+    const h = await DB.get('backupDir'); if (!h) throw new Error('لم يُحدَّد المجلد');
+    let perm = await h.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted' && interactive) perm = await h.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') { renderAutoBar(true); return; }
+    const ts = new Date().toISOString(), forUpd = S.meta.updatedAt, blob = backupBlob(ts);
+    for (const name of [AUTO_FILE, `مبادرات-تلقائي-${stamp()}.json`]) {   // آخر نسخة + نسخة لكل يوم
+      const fh = await h.getFileHandle(name, { create: true });
+      const w = await fh.createWritable(); await w.write(blob); await w.close();
+    }
+    autoWrittenFor = forUpd; S.meta.lastBackupAt = ts; renderBackupAlert(); renderAutoBar(false);
+    schedulePdfSave(interactive ? 500 : 20000);
+    await Store.save(S);
+    setSaveState(`تم الحفظ + نسخة تلقائية في (${h.name}) ${hhmm()}`, 'text-success');
+    if (interactive) toast(`تم الحفظ التلقائي في المجلد (${h.name})`);
+  } catch (e) {
+    console.error(e); renderAutoBar(true);
+    if (interactive) toast('تعذّر الحفظ التلقائي: ' + (e.message || e), 'warning', 7000);
+  } finally { autoBusy = false; }
+}
+function renderAutoBar(needs) {
+  const bar = $('#autoBkBar'); if (bar) bar.classList.toggle('d-none', !(autoOn && needs));
+  const lbl = $('#bkAutoLabel'); if (lbl) lbl.textContent = autoOn ? 'الحفظ التلقائي في مجلد: مُفعّل ✓ (اضغط للإيقاف)' : 'تفعيل الحفظ التلقائي في مجلد';
+}
+async function toggleAutoBackup() {
+  if (autoOn) {
+    if (!confirm('إيقاف الحفظ التلقائي في المجلد؟')) return;
+    autoOn = false; await DB.set('autoBackup', false); renderAutoBar(false); toast('تم إيقاف الحفظ التلقائي', 'secondary'); return;
+  }
+  try {
+    alert('اختر مجلد النسخ الاحتياطي (مثلاً مجلد backup على سطح المكتب).\nسيُحفظ فيه تلقائيًا بعد كل إدخال أو تعديل:\n• ملف «آخر نسخة» يُحدَّث دائمًا\n• ونسخة مستقلة لكل يوم');
+    const h = await window.showDirectoryPicker({ mode: 'readwrite', id: 'initiatives-backup', startIn: 'desktop' });
+    if ((await h.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('لم يُمنح إذن الكتابة في المجلد');
+    await DB.set('backupDir', h);
+    alert('الآن اختر مجلد حفظ التقارير بصيغة PDF (مثلاً مجلد pdf على سطح المكتب).\nيُحفظ فيه تلقائيًا التقرير المفصّل الملوّن بعد التعديلات.');
+    try {
+      const hp = await window.showDirectoryPicker({ mode: 'readwrite', id: 'initiatives-pdf', startIn: 'desktop' });
+      if ((await hp.requestPermission({ mode: 'readwrite' })) === 'granted') await DB.set('pdfDir', hp);
+    } catch (e) { if (e && e.name !== 'AbortError') throw e; }
+    await DB.set('autoBackup', true);
+    autoOn = true; autoWrittenFor = '-'; pdfWrittenFor = '-'; await autoBackupNow(true);
+  } catch (e) { if (e && e.name !== 'AbortError') toast('تعذّر تفعيل الحفظ التلقائي: ' + (e.message || e), 'danger', 7000); }
+}
+async function initAutoBackup() {
+  if (!canFolder()) return;
+  $('#bkAutoItem').classList.remove('d-none'); $('#bkPdfItem').classList.remove('d-none');
+  try { autoOn = !!(await DB.get('autoBackup')) && !!(await DB.get('backupDir')); } catch (e) { autoOn = false; }
+  renderAutoBar(false);
+  if (autoOn) renderAutoBar(!(await dirOk('backupDir')) || ((await DB.get('pdfDir')) && !(await dirOk('pdfDir'))));
+}
+async function dirOk(key, ask) {
+  const h = await DB.get(key); if (!h) return false;
+  let p = await h.queryPermission({ mode: 'readwrite' });
+  if (p !== 'granted' && ask) p = await h.requestPermission({ mode: 'readwrite' });
+  return p === 'granted';
+}
+async function allowFolders() {
+  try {
+    const a = await dirOk('backupDir', true), b = (await DB.get('pdfDir')) ? await dirOk('pdfDir', true) : true;
+    if (!a || !b) { toast('لم تُمنح الموافقة على أحد المجلدين — اضغط الزر مرة أخرى.', 'warning', 6000); renderAutoBar(true); return; }
+    autoWrittenFor = '-'; pdfWrittenFor = '-'; await autoBackupNow(true);
+  } catch (e) { toast('تعذّر: ' + (e.message || e), 'danger', 6000); }
+}
+
+/* ---------- إنشاء ملف PDF للتقرير المفصّل وحفظه في مجلد (بدون شاشة الطباعة) ---------- */
+const PDF_LATEST = 'تقرير-المبادرات-آخر-نسخة.pdf';
+let pdfTimer = null, pdfWrittenFor = '-', pdfBusy = false, fontCssPromise = null;
+function schedulePdfSave(ms) {
+  if (!autoOn) return;
+  clearTimeout(pdfTimer); pdfTimer = setTimeout(() => savePdfToFolder(false), ms);
+}
+const blobToDataURL = b => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(b); });
+async function fetchCssWithFonts(url) {
+  const res = await fetch(url, { mode: 'cors' }); if (!res.ok) throw new Error(res.status);
+  let css = await res.text();
+  const urls = [...new Set([...css.matchAll(/url\((['"]?)([^'")]+)\1\)/g)].map(m => m[2]))]
+    .filter(u => !u.startsWith('data:') && /\.woff2(\?|$)/.test(u) && !/fa-(brands|regular|v4compat)/.test(u));
+  await Promise.all(urls.map(async u => {
+    try { const r = await fetch(new URL(u, url).href, { mode: 'cors' }); if (r.ok) css = css.split(u).join(await blobToDataURL(await r.blob())); } catch (e) {}
+  }));
+  return css;
+}
+function getFontCss() {   // خط Tajawal والأيقونات مضمّنة داخل الصفحات حتى تظهر في PDF كما في البرنامج
+  if (!fontCssPromise) fontCssPromise = Promise.all([
+    'https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap',
+    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
+  ].map(u => fetchCssWithFonts(u).catch(() => ''))).then(a => { const css = a.join('\n'); if (!css) fontCssPromise = null; return css; });
+  return fontCssPromise;
+}
+const PDF_BREAKS = '.r-head,.r-summary,.r-charts,.r-goal,.r-grid,.r-members,.r-prog,.r-chart,.r-weeks,.r-tbl tr,.r-nl li,.r-sub,.r-title,.r-notes,.r-tbl';
+async function blockToCanvas(html, W, scale, css) {
+  const box = document.createElement('div');
+  box.style.cssText = `position:absolute;left:-30000px;top:0;width:${W}px;`;
+  box.innerHTML = `<div class="pdfwrap" dir="rtl">${html}</div>`;
+  document.body.appendChild(box);
+  const wrap = box.firstChild, top = wrap.getBoundingClientRect().top, H = Math.ceil(wrap.getBoundingClientRect().height);
+  const breaks = [...new Set($$(PDF_BREAKS, wrap).map(e => Math.round(e.getBoundingClientRect().bottom - top + 1)))].sort((a, b) => a - b);
+  const xhtml = new XMLSerializer().serializeToString(wrap);
+  box.remove();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject x="0" y="0" width="${W}" height="${H}"><div xmlns="http://www.w3.org/1999/xhtml"><style><![CDATA[${css}]]></style>${xhtml}</div></foreignObject></svg>`;
+  const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  await img.decode();
+  const c = document.createElement('canvas'); c.width = Math.round(W * scale); c.height = Math.round(H * scale);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+  return { c, H, breaks };
+}
+async function reportPdfBlob() {
+  const mm = 96 / 25.4, W = Math.round(190 * mm), H = Math.round(277 * mm), SC = 2, GAP = 14;
+  const fonts = await getFontCss();
+  const own = [...document.querySelectorAll('style')].filter(st => st.id !== 'pageSize').map(st => st.textContent).join('\n');
+  const css = `${fonts}\n${own}\n*{box-sizing:border-box}.pdfwrap{width:${W}px;padding:0 3px;font-family:'Tajawal',sans-serif;font-size:12.5px;color:#2d3748;background:#fff;line-height:1.5}
+    .pdfwrap h1,.pdfwrap h2{margin:0}.pdfwrap .r-foot{margin-top:0}${fonts.includes('Font Awesome') ? '' : '.pdfwrap i.fa-solid{display:none}'}`;
+  const full = buildReport(S.initiatives, S.initiatives.length > 1);
+  const tmp = document.createElement('div'); tmp.innerHTML = full;
+  const cards = $$('.r-card', tmp), foot = $('.r-foot', tmp);
+  cards.forEach(c => c.remove()); foot.remove();
+  const blocks = [{ html: tmp.innerHTML, np: false }].concat(cards.map((c, i) => ({ html: c.outerHTML, np: i > 0 })));
+  const pages = []; let pg = null, y = 0;
+  const newPage = () => { const c = document.createElement('canvas'); c.width = W * SC; c.height = H * SC; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); pg = g; pages.push(c); y = 0; };
+  const draw = (b, from, to) => { pg.drawImage(b.c, 0, from * SC, W * SC, (to - from) * SC, 0, y * SC, W * SC, (to - from) * SC); y += to - from; };
+  for (const bl of blocks) {
+    const b = await blockToCanvas(bl.html, W, SC, css);
+    if (!pg || bl.np) newPage(); else if (y > 0) y += GAP;
+    if (y + b.H > H && y > 0 && b.H <= H) newPage();
+    let off = 0;
+    while (off < b.H) {
+      const avail = H - y;
+      if (b.H - off <= avail) { draw(b, off, b.H); break; }
+      let cut = b.breaks.filter(v => v > off + 40 && v <= off + avail).pop();
+      if (!cut) { if (y > 0) { newPage(); continue; } cut = off + avail; }
+      draw(b, off, cut); newPage(); off = cut;
+    }
+  }
+  const f = await blockToCanvas(foot.outerHTML, W, SC, css);
+  if (y + f.H + 10 > H) newPage();
+  y = H - f.H; draw(f, 0, f.H);
+  const jpegs = await Promise.all(pages.map(c => new Promise(ok => c.toBlob(async bl => ok({ bytes: new Uint8Array(await bl.arrayBuffer()), w: c.width, h: c.height }), 'image/jpeg', 0.9))));
+  return makePdf(jpegs);
+}
+function makePdf(imgs) {   // ملف PDF بسيط: كل صفحة A4 صورة بهامش 10 مم
+  const enc = new TextEncoder(), parts = [], offs = []; let len = 0;
+  const push = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const PW = 595.28, PH = 841.89, M = 28.35, n = imgs.length;
+  push(new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52, 10, 37, 226, 227, 207, 211, 10]));   // %PDF-1.4
+  const obj = (id, body) => { offs[id] = len; push(`${id} 0 obj\n${body}\nendobj\n`); };
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Count ${n} /Kids [${imgs.map((_, i) => `${3 + i * 3} 0 R`).join(' ')}] >>`);
+  imgs.forEach((im, i) => {
+    const p = 3 + i * 3, ct = `q ${(PW - 2 * M).toFixed(2)} 0 0 ${(PH - 2 * M).toFixed(2)} ${M} ${M} cm /Im0 Do Q`;
+    obj(p, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im0 ${p + 2} 0 R >> >> /Contents ${p + 1} 0 R >>`);
+    obj(p + 1, `<< /Length ${ct.length} >>\nstream\n${ct}\nendstream`);
+    offs[p + 2] = len;
+    push(`${p + 2} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.bytes.length} >>\nstream\n`);
+    push(im.bytes); push('\nendstream\nendobj\n');
+  });
+  const xref = len, total = 3 + n * 3;
+  push(`xref\n0 ${total}\n0000000000 65535 f \n` + offs.slice(1, total).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join(''));
+  push(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type: 'application/pdf' });
+}
+async function savePdfToFolder(interactive) {
+  if (pdfBusy) return;
+  let h = await DB.get('pdfDir');
+  try {
+    if (!h) {
+      if (!interactive) return;
+      h = await window.showDirectoryPicker({ mode: 'readwrite', id: 'initiatives-pdf', startIn: 'desktop' });
+      await DB.set('pdfDir', h);
+    }
+    let perm = await h.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted' && interactive) perm = await h.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') { renderAutoBar(true); return; }
+    if (!interactive && S.meta.updatedAt === pdfWrittenFor) return;
+    pdfBusy = true; if (interactive) toast('جارٍ إنشاء ملف PDF...', 'info', 2500);
+    const forUpd = S.meta.updatedAt, blob = await reportPdfBlob();
+    for (const name of [PDF_LATEST, `تقرير-المبادرات-${stamp()}.pdf`]) {
+      const fh = await h.getFileHandle(name, { create: true });
+      const w = await fh.createWritable(); await w.write(blob); await w.close();
+    }
+    pdfWrittenFor = forUpd;
+    setSaveState(`تم الحفظ + نسخة تلقائية + PDF ${hhmm()}`, 'text-success');
+    if (interactive) toast(`تم حفظ التقرير PDF في المجلد (${h.name})`);
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+    console.error(e); if (interactive) toast('تعذّر حفظ ملف PDF: ' + (e.message || e), 'danger', 7000);
+  } finally { pdfBusy = false; }
+}
+
 async function importBackup(file) {
   try {
     const text = await file.text();
@@ -847,7 +1047,7 @@ function buildReport(list, withSummary) {
   return `<header class="r-head"><div><h1>منظومة إدارة ومتابعة المبادرات الإستراتيجية</h1>
       <div>${list.length === 1 ? 'تقرير مبادرة' : 'التقرير المفصّل للمبادرات'}</div></div><div class="r-date">تاريخ التقرير<br><b>${stamp()}</b></div></header>
     ${sum}${list.map(reportCard).join('')}
-    <footer class="r-foot"><div>مسؤول المبادرات: <b>محمد السعدي</b></div><div>أخصائي المتابعة: <b>فهد العبيداني</b></div><div>إعداد وتصميم: <b>إبراهيم البلوشي</b></div><div>اعتماد مدير الدائرة: <b>الدكتور سعيد الشبلي</b></div></footer>`;
+    <footer class="r-foot"><div>إعداد وتصميم: <b>إبراهيم البلوشي</b></div></footer>`;
 }
 function preparePrint(mode) {
   printMode = mode;
@@ -858,6 +1058,21 @@ function preparePrint(mode) {
   $('#reportArea').innerHTML = buildReport(list, list.length > 1);
   document.body.classList.remove('print-full', 'print-report'); document.body.classList.add(cls);
   $('#pageSize').textContent = `@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; }`;
+  placeFooter(landscape);
+}
+// يدفع عبارة «إعداد وتصميم» إلى أسفل يسار الصفحة الأخيرة
+function placeFooter(landscape) {
+  const ra = $('#reportArea'), foot = $('.r-foot', ra); if (!foot) return;
+  const mm = 96 / 25.4, W = (landscape ? 277 : 190) * mm, H = (landscape ? 190 : 277) * mm;
+  const old = ra.getAttribute('style') || '';
+  ra.setAttribute('style', `display:block;position:absolute;top:0;left:-20000px;width:${W}px;visibility:hidden;font-size:12.5px`);
+  foot.style.marginTop = '0';
+  const cards = $$('.r-card', ra), start = cards.length > 1 ? cards[cards.length - 1] : ra.firstElementChild;
+  const used = foot.offsetTop - start.offsetTop, fh = foot.offsetHeight;
+  ra.setAttribute('style', old);
+  let gap = H - (used % H) - fh - 14;
+  if (gap < 0) gap += H;          // لا تكفي المساحة: تنتقل لأسفل الصفحة التالية
+  foot.style.marginTop = Math.max(18, Math.floor(gap)) + 'px';
 }
 function printReport(mode) { preparePrint(mode); setTimeout(() => window.print(), 60); }
 
@@ -938,6 +1153,9 @@ function bindEvents() {
   $('#bkImport').addEventListener('click', () => $('#importFile').click());
   $('#importFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importBackup(f); });
   $('#bkReset').addEventListener('click', resetAll);
+  $('#bkAuto').addEventListener('click', toggleAutoBackup);
+  $('#autoBkBtn').addEventListener('click', allowFolders);
+  $('#bkPdf').addEventListener('click', () => savePdfToFolder(true));
   $('#alertBackupNow').addEventListener('click', () => ('showDirectoryPicker' in window && window.isSecureContext) ? backupToFolder(false) : exportBackup());
   $('#alertDismiss').addEventListener('click', () => { try { sessionStorage.setItem('bkDismiss', '1'); } catch (e) {} renderBackupAlert(); });
 
@@ -976,6 +1194,7 @@ async function init() {
   S = normalize(loaded);
   if (!loaded && !failed) scheduleSave();
   renderAll();
+  if (!failed) initAutoBackup().catch(e => console.warn('autoBackup:', e));
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   // بعض المكتبات الخارجية قد تتأخر: نعيد رسم الرسوم عند اكتمال التحميل
   window.addEventListener('load', renderCharts);

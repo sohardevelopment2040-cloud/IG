@@ -1,5 +1,5 @@
 /* Service Worker — منظومة متابعة المبادرات */
-const VERSION = 'initiatives-mobile-v9';
+const VERSION = 'initiatives-mobile-v12';
 const CORE = [
   './',
   './index.html',
@@ -67,7 +67,9 @@ self.addEventListener('fetch', event => {
   if (url.protocol.startsWith('http')) {
     event.respondWith((async () => {
       const cache = await caches.open(VERSION);
-      const cached = await cache.match(req);
+      let cached = await cache.match(req);
+      // طلبات الخطوط/الأنماط بوضع CORS (لإنشاء PDF) لا تقبل النسخة المخزنة المعتمة
+      if (cached && cached.type === 'opaque' && req.mode === 'cors') cached = null;
       const network = fetch(req).then(res => {
         if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
         return res;
